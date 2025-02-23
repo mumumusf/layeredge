@@ -1,18 +1,13 @@
-import fs from 'fs/promises';
+// 导入必要的模块
+import fs from 'fs';
 import axios from 'axios';
-import { HttpsProxyAgent } from 'https-proxy-agent';
+import { URL } from 'url';
 import { SocksProxyAgent } from 'socks-proxy-agent';
+import { HttpsProxyAgent } from 'https-proxy-agent';
+import { HttpProxyAgent } from 'http-proxy-agent';
 import chalk from 'chalk';
-import banner from './banner.js';
 import readline from 'readline';
-
-const API_ENDPOINT = 'https://m8k9mykqqj.us-east-1.awsapprunner.com/api/harvest-data';
-const DASHBOARD_API = 'https://api.dashboard.3dos.io/api/profile/me';
-const DELAY_SECONDS = 60;
-const HARVEST_FILE = 'harvest.json';
-const SECRETS_FILE = 'secret.txt';
-const TOKENS_FILE = 'token.txt';
-const PROXY_FILE = 'proxy.txt';
+import displayBanner from './banner.js';
 
 // 创建readline接口
 const rl = readline.createInterface({
@@ -20,435 +15,468 @@ const rl = readline.createInterface({
     output: process.stdout
 });
 
-// Promise化的问题函数
+// 封装readline的promise版本
 const question = (query) => new Promise((resolve) => rl.question(query, resolve));
 
-const delay = (seconds) => new Promise(resolve => setTimeout(resolve, seconds * 1000));
-
-// 保存配置到文件
-async function saveToFile(filePath, content) {
-    try {
-        await fs.writeFile(filePath, content, 'utf8');
-        console.log(chalk.green(`✓ 成功保存到 ${filePath}`));
-    } catch (error) {
-        console.error(chalk.red(`保存到 ${filePath} 失败: ${error.message}`));
-        throw error;
-    }
-}
-
-// 获取用户输入的账户信息
-async function getAccountInfo() {
-    console.log(chalk.cyan('\n=== 账户配置 ==='));
-    console.log(chalk.yellow('请按照提示输入您的账户信息。每个账户的Secret和Token请用回车分隔。'));
-    console.log(chalk.yellow('当您输入完所有账户后，请直接按回车结束输入。\n'));
-
-    const secrets = [];
-    const tokens = [];
-    let accountNum = 1;
-
-    while (true) {
-        console.log(chalk.cyan(`\n--- 账户 ${accountNum} ---`));
-        const secret = await question(chalk.yellow('请输入Secret (直接按回车结束输入): '));
+// NodeGoPinger类 - 处理单个账户的所有操作
+class NodeGoPinger {
+    constructor(token, proxyUrl = null) {
+        // 初始化基本配置
+        this.apiBaseUrl = 'https://nodego.ai/api';
+        this.bearerToken = token;
+        this.agent = proxyUrl ? this.createProxyAgent(proxyUrl) : null;
+        this.lastPingTimestamp = 0;
         
-        if (!secret) break;
-        
-        const token = await question(chalk.yellow('请输入Token: '));
-        if (!token) {
-            console.log(chalk.red('Token不能为空，请重试'));
-            continue;
-        }
-
-        secrets.push(secret);
-        tokens.push(token);
-        accountNum++;
+        // 定义所有可用的任务列表
+        this.tasksList = [
+            { code: 'T001', name: '验证邮箱' },
+            { code: 'T002', name: '加入电报频道' },
+            { code: 'T003', name: '加入电报群组' },
+            { code: 'T004', name: '助力电报频道' },
+            { code: 'T005', name: '关注X账号' },
+            { code: 'T006', name: '评价Chrome扩展' },
+            { code: 'T007', name: '加入电报小程序' },
+            { code: 'T009', name: '加入Discord频道' },
+            { code: 'T010', name: '在名字中添加NodeGo.Ai' },
+            { code: 'T011', name: '在X上分享推荐链接' },
+            { code: 'T012', name: '转发我们的推文' },
+            { code: 'T014', name: '评论并标记3位好友' },
+            { code: 'T100', name: '邀请1位好友' },
+            { code: 'T101', name: '邀请3位好友' },
+            { code: 'T102', name: '邀请5位好友' },
+            { code: 'T103', name: '邀请10位好友' }
+        ];
     }
 
-    return { secrets, tokens };
-}
-
-// 格式化代理地址
-function formatProxyUrl(proxy) {
-    try {
-        // 如果已经是标准格式，直接返回
-        if (proxy.startsWith('http://') || proxy.startsWith('https://') || 
-            proxy.startsWith('socks4://') || proxy.startsWith('socks5://')) {
-            return proxy;
-        }
-
-        // 移除空格
-        proxy = proxy.trim();
-
-        // 分割代理字符串
-        let parts;
-        
-        // 处理包含@的格式 (用户名密码在前面)
-        if (proxy.includes('@')) {
-            const [auth, address] = proxy.split('@');
-            if (auth && address) {
-                const [username, password] = auth.split(':');
-                const [ip, port] = address.split(':');
-                if (username && password && ip && port) {
-                    return `http://${username}:${password}@${ip}:${port}`;
-                }
-            }
-        }
-        
-        // 处理用:分隔的格式
-        parts = proxy.split(':');
-        
-        switch (parts.length) {
-            case 2: // ip:port
-                return `http://${parts[0]}:${parts[1]}`;
-            
-            case 3: // ip:port:protocol 或 ip:port:username
-                if (['http', 'https', 'socks4', 'socks5'].includes(parts[2].toLowerCase())) {
-                    return `${parts[2].toLowerCase()}://${parts[0]}:${parts[1]}`;
-                } else {
-                    return `http://${parts[2]}:@${parts[0]}:${parts[1]}`;
-                }
-            
-            case 4: // ip:port:username:password
-                return `http://${parts[2]}:${parts[3]}@${parts[0]}:${parts[1]}`;
-            
-            case 5: // protocol:ip:port:username:password
-                if (['http', 'https', 'socks4', 'socks5'].includes(parts[0].toLowerCase())) {
-                    return `${parts[0].toLowerCase()}://${parts[3]}:${parts[4]}@${parts[1]}:${parts[2]}`;
-                }
-                break;
-        }
-
-        // 如果是纯IP，尝试添加默认端口80
-        if (/^(\d{1,3}\.){3}\d{1,3}$/.test(proxy)) {
-            return `http://${proxy}:80`;
-        }
-
-        // 如果无法识别格式，返回原始值并添加http://
-        return proxy.startsWith('http') ? proxy : `http://${proxy}`;
-    } catch (error) {
-        console.error(chalk.yellow(`代理格式无法解析: ${proxy}，将使用原始格式`));
-        return proxy;
-    }
-}
-
-// 获取代理配置
-async function getProxyConfig() {
-    console.log(chalk.cyan('\n=== 代理配置 ==='));
-    console.log(chalk.yellow('请输入代理服务器地址，每行一个。直接按回车结束输入。'));
-    console.log(chalk.yellow('支持的格式:'));
-    console.log(chalk.yellow('  - ip:port'));
-    console.log(chalk.yellow('  - ip:port:username:password'));
-    console.log(chalk.yellow('  - ip:port:protocol'));
-    console.log(chalk.yellow('  - protocol:ip:port:username:password'));
-    console.log(chalk.yellow('  - username:password@ip:port'));
-    console.log(chalk.yellow('  - http://username:password@ip:port'));
-    console.log(chalk.yellow('  - socks4://ip:port'));
-    console.log(chalk.yellow('  - socks5://username:password@ip:port'));
-    console.log(chalk.yellow('  - 纯IP地址（将使用默认端口80）\n'));
-
-    const proxies = [];
-    while (true) {
-        const proxy = await question(chalk.yellow('请输入代理地址 (直接按回车结束输入): '));
-        if (!proxy) break;
-        
-        const formattedProxy = formatProxyUrl(proxy.trim());
-        console.log(chalk.gray(`格式化后的代理地址: ${formattedProxy}`));
-        proxies.push(formattedProxy);
-    }
-
-    return proxies;
-}
-
-// 获取收获数据
-async function getHarvestData() {
-    const harvestData = {
-        url: "https://www.tokopedia.com/",
-        harvestedData: "Download Tokopedia App\nTentang Tokopedia\nMitra Tokopedia\nMulai Berjualan\nPromo\nTokopedia Care\nKategori\nMasuk\nDaftar\nSamsung Note 10\nCharger Mobil\nSamsung A73\nPull Up Bar\nHdd 1tb\nXbox Series X\nKe slide 1\nKe slide 2\nKe slide 3\nKe slide 4\nKe slide 5\nLihat Promo Lainnya\nprev\nnext"
-    };
-
-    // 保存到文件
-    await saveToFile(HARVEST_FILE, JSON.stringify(harvestData, null, 4));
-
-    return harvestData;
-}
-
-// 修改初始化配置函数
-async function initializeConfig() {
-    try {
-        console.log(banner);
-        console.log(chalk.cyan('\n欢迎使用3DOS自动收获机器人！'));
-        console.log(chalk.yellow('首次使用需要进行配置，请按照提示完成设置。\n'));
-
-        // 获取账户信息
-        const { secrets, tokens } = await getAccountInfo();
-        if (secrets.length === 0) {
-            throw new Error('未输入任何账户信息');
-        }
-
-        // 获取代理配置
-        const proxies = await getProxyConfig();
-
-        // 获取收获数据
-        const harvestData = await getHarvestData();
-
-        // 保存配置
-        await saveToFile(SECRETS_FILE, secrets.join('\n'));
-        await saveToFile(TOKENS_FILE, tokens.join('\n'));
-        if (proxies.length > 0) {
-            await saveToFile(PROXY_FILE, proxies.join('\n'));
-        }
-
-        console.log(chalk.green('\n✓ 配置完成！'));
-        return { secrets, tokens, proxies, harvestData };
-    } catch (error) {
-        console.error(chalk.red(`配置过程出错: ${error.message}`));
-        process.exit(1);
-    }
-}
-
-// 读取文件内容并按行分割
-async function readFileLines(filePath) {
-    try {
-        const content = await fs.readFile(filePath, 'utf8');
-        return content.split('\n').filter(line => line.trim());
-    } catch (error) {
-        if (error.code === 'ENOENT') {
-            return [];
-        }
-        throw error;
-    }
-}
-
-async function readProxies() {
-    const proxies = await readFileLines(PROXY_FILE);
-    return proxies.filter(proxy => proxy.trim());
-}
-
-async function readSecrets() {
-    return await readFileLines(SECRETS_FILE);
-}
-
-async function readTokens() {
-    return await readFileLines(TOKENS_FILE);
-}
-
-// 修改读取收获数据函数
-async function readHarvestData() {
-    try {
-        const data = await fs.readFile(HARVEST_FILE, 'utf8');
-        return JSON.parse(data);
-    } catch (error) {
-        if (error.code === 'ENOENT') {
-            console.log(chalk.yellow('未找到收获数据配置，请输入新的配置。'));
-            return await getHarvestData();
-        }
-        console.error(chalk.red(`读取收获文件错误: ${error.message}`));
-        process.exit(1);
-    }
-}
-
-function createProxyAgent(proxyUrl) {
-    try {
-        if (!proxyUrl) return null;
-        
-        if (proxyUrl.startsWith('socks4://') || proxyUrl.startsWith('socks5://')) {
-            return new SocksProxyAgent(proxyUrl);
-        } else {
-            // 处理HTTP/HTTPS代理
-            if (!proxyUrl.startsWith('http://') && !proxyUrl.startsWith('https://')) {
-                proxyUrl = `http://${proxyUrl}`;
-            }
-            return new HttpsProxyAgent(proxyUrl);
-        }
-    } catch (error) {
-        console.error(chalk.red(`创建代理代理实例错误: ${error.message}`));
-        return null;
-    }
-}
-
-function createAxiosInstance(proxyUrl = null) {
-    const config = {
-        headers: {
-            'Content-Type': 'application/json',
-            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/133.0.0.0 Safari/537.36',
-            'Accept': '*/*',
-            'Accept-Language': 'en-US,en;q=0.9',
-            'Accept-Encoding': 'gzip, deflate, br',
-            'Connection': 'keep-alive'
-        },
-        timeout: 30000, // 30秒超时
-        maxRetries: 3,  // 最大重试次数
-        retryDelay: 1000 // 重试延迟（毫秒）
-    };
-
-    if (proxyUrl) {
-        const proxyAgent = createProxyAgent(proxyUrl);
-        if (proxyAgent) {
-            config.httpsAgent = proxyAgent;
-            config.httpAgent = proxyAgent;
-        }
-    }
-
-    const instance = axios.create(config);
-
-    // 添加重试逻辑
-    instance.interceptors.response.use(undefined, async (err) => {
-        const config = err.config;
-        if (!config || !config.maxRetries) return Promise.reject(err);
-
-        config.retryCount = config.retryCount ?? 0;
-        if (config.retryCount >= config.maxRetries) {
-            return Promise.reject(err);
-        }
-
-        config.retryCount += 1;
-        const delay = config.retryDelay * config.retryCount;
-        await new Promise(resolve => setTimeout(resolve, delay));
-        return instance(config);
-    });
-
-    return instance;
-}
-
-async function getEarningsData(bearerToken, axiosInstance) {
-    try {
-        const response = await axiosInstance.post(DASHBOARD_API, {}, {
-            headers: {
-                'Authorization': `Bearer ${bearerToken}`,
-                'Origin': 'https://dashboard.3dos.io',
-                'Referer': 'https://dashboard.3dos.io/'
-            }
-        });
-
-        if (response.data.data) {
-            const data = response.data.data;
-            const todayEarning = parseInt(data.todays_earning) || 0;
-            return {
-                todaysEarning: {
-                    tpoints: todayEarning,
-                    date: new Date().toLocaleDateString()
-                },
-                loyaltyPoints: data.loyalty_points,
-                username: data.username,
-                currentTier: data.tier.tier_name
-            };
-        }
-        throw new Error('无效的响应结构');
-    } catch (error) {
-        const errorMessage = error.response?.data?.message || error.message;
-        console.error(chalk.red(`获取收益数据错误: ${errorMessage}`));
-        return null;
-    }
-}
-
-async function sendHarvestedData(apiSecret, url, harvestData, axiosInstance) {
-    try {
-        const response = await axiosInstance.post(API_ENDPOINT, {
-            apiSecret,
-            url: url,
-            harvestedData: harvestData
-        }, {
-            headers: {
-                'Content-Type': 'application/json',
-                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/133.0.0.0 Safari/537.36'
-            }
-        });
-        return response.data;
-    } catch (error) {
-        const errorMessage = error.response?.data?.message || error.message;
-        console.error(chalk.red(`发送数据错误: ${errorMessage}`));
-        return null;
-    }
-}
-
-function displayEarnings(earningsData, accountIndex) {
-    if (earningsData) {
-        const { todaysEarning, loyaltyPoints, username, currentTier } = earningsData;
-        console.log(chalk.cyan(`\n[账户 ${accountIndex + 1}]`));
-        console.log(chalk.cyan(`用户名: ${chalk.bold(username)} (${currentTier})`));
-        console.log(chalk.cyan(`今日收益: ${chalk.bold(todaysEarning.tpoints)} 积分 (${todaysEarning.date})`));
-        console.log(chalk.cyan(`总忠诚度积分: ${chalk.bold(loyaltyPoints)}`));
-    }
-}
-
-async function harvestAccount(accountIndex, secret, token, harvestData, proxy) {
-    try {
-        const axiosInstance = createAxiosInstance(proxy);
-        console.log(chalk.yellow(`[账户 ${accountIndex + 1}] 使用代理: ${proxy || '直接连接'}`));
-        
-        const harvestResult = await sendHarvestedData(secret, harvestData.url, harvestData.harvestedData, axiosInstance);
-        if (harvestResult) {
-            console.log(chalk.green(`✓ 账户 ${accountIndex + 1}: 收获数据发送成功`));
-            const earningsData = await getEarningsData(token, axiosInstance);
-            displayEarnings(earningsData, accountIndex);
-        }
-    } catch (error) {
-        console.error(chalk.red(`[账户 ${accountIndex + 1}] 错误: ${error.message}`));
-    }
-}
-
-async function continuousHarvest() {
-    try {
-        let secrets, tokens, proxies, harvestData;
-
-        // 检查是否存在配置文件
+    // 创建代理代理
+    createProxyAgent(proxyUrl) {
         try {
-            secrets = await readSecrets();
-            tokens = await readTokens();
-            proxies = await readProxies();
-            harvestData = await readHarvestData();
+            // 处理不同格式的代理地址
+            let parsedUrl;
+            
+            // 移除空格
+            proxyUrl = proxyUrl.trim();
+            
+            // 检查是否包含协议
+            if (!proxyUrl.includes('://')) {
+                const parts = proxyUrl.split(':');
+                
+                // 处理 ip:port:username:password 格式
+                if (parts.length === 4) {
+                    const [ip, port, username, password] = parts;
+                    proxyUrl = `http://${username}:${password}@${ip}:${port}`;
+                }
+                // 处理 username:password@ip:port 格式
+                else if (proxyUrl.includes('@')) {
+                    const [auth, address] = proxyUrl.split('@');
+                    const [username, password] = auth.split(':');
+                    const [host, port] = address.split(':');
+                    proxyUrl = `http://${username}:${password}@${host}:${port}`;
+                }
+                // 处理 ip:port 格式
+                else if (proxyUrl.includes(':')) {
+                    proxyUrl = `http://${proxyUrl}`;
+                }
+            }
+            
+            // 尝试解析URL
+            try {
+                parsedUrl = new URL(proxyUrl);
+            } catch (e) {
+                throw new Error('代理地址格式错误');
+            }
 
-            if (secrets.length === 0 || tokens.length === 0) {
-                throw new Error('配置文件为空');
+            // 根据协议创建对应的代理agent
+            const protocol = parsedUrl.protocol.toLowerCase();
+            
+            switch (protocol) {
+                case 'socks4:':
+                case 'socks5:':
+                case 'socks4a:':
+                case 'socks5h:':
+                case 'socks:':
+                    return new SocksProxyAgent(parsedUrl);
+                    
+                case 'http:':
+                case 'https:':
+                    return {
+                        httpAgent: new HttpProxyAgent(parsedUrl),
+                        httpsAgent: new HttpsProxyAgent(parsedUrl)
+                    };
+                    
+                default:
+                    throw new Error(`不支持的代理协议: ${protocol}`);
             }
         } catch (error) {
-            // 如果配置文件不存在或为空，进行初始化配置
-            const config = await initializeConfig();
-            secrets = config.secrets;
-            tokens = config.tokens;
-            proxies = config.proxies;
-            harvestData = config.harvestData;
+            console.error(chalk.red('代理设置错误:'), error.message);
+            return null;
+        }
+    }
+
+    // 发送API请求的通用方法
+    async makeRequest(method, endpoint, data = null) {
+        const config = {
+            method,
+            url: `${this.apiBaseUrl}${endpoint}`,
+            headers: {
+                'Authorization': `Bearer ${this.bearerToken}`,
+                'Content-Type': 'application/json',
+                'Accept': '*/*'
+            },
+            ...(data && { data }),
+            timeout: 30000
+        };
+
+        // 如果配置了代理，添加代理设置
+        if (this.agent) {
+            if (this.agent.httpAgent) {
+                config.httpAgent = this.agent.httpAgent;
+                config.httpsAgent = this.agent.httpsAgent;
+            } else {
+                config.httpAgent = this.agent;
+                config.httpsAgent = this.agent;
+            }
         }
 
-        if (secrets.length !== tokens.length) {
-            throw new Error('密钥和令牌的数量不匹配');
+        try {
+            return await axios(config);
+        } catch (error) {
+            if (error.code === 'ECONNREFUSED' || error.code === 'ETIMEDOUT') {
+                throw new Error(`代理连接失败: ${error.message}`);
+            }
+            throw error;
         }
+    }
 
-        console.log(chalk.bold(`\n开始持续收获 ${secrets.length} 个账户，间隔 ${DELAY_SECONDS} 秒...`));
-        console.log(chalk.bold(`已加载 ${proxies.length} 个代理`));
-        console.log(chalk.bold(`目标网站: ${harvestData.url}`));
+    // 获取用户信息
+    async getUserInfo() {
+        try {
+            const response = await this.makeRequest('GET', '/user/me');
+            const metadata = response.data.metadata;
+            return {
+                username: metadata.username,
+                email: metadata.email,
+                totalPoint: metadata.rewardPoint,
+                socialTasks: metadata.socialTask || [],
+                nodes: metadata.nodes.map(node => ({
+                    id: node.id,
+                    totalPoint: node.totalPoint,
+                    todayPoint: node.todayPoint,
+                    isActive: node.isActive
+                }))
+            };
+        } catch (error) {
+            console.error(chalk.red('获取用户信息失败:'), error.message);
+            throw error;
+        }
+    }
 
-        while (true) {
-            const timestamp = new Date().toLocaleString();
-            console.log(chalk.yellow('\n═══════════════════════════════════════════'));
-            console.log(chalk.bold(`[${timestamp}] 开始收获周期`));
+    // 生成随机延迟时间
+    getRandomDelay(min, max) {
+        return Math.floor(Math.random() * (max - min + 1) + min);
+    }
 
-            for (let i = 0; i < secrets.length; i++) {
-                const proxy = proxies.length > 0 ? proxies[i % proxies.length] : null;
-                await harvestAccount(i, secrets[i].trim(), tokens[i].trim(), harvestData, proxy);
-
-                if (i < secrets.length - 1) {
-                    await delay(5);
-                }
+    // 执行ping操作
+    async ping() {
+        try {
+            const currentTime = Date.now();
+            
+            // 确保ping操作之间至少间隔30-45秒的随机时间
+            const minDelay = 30000;
+            const maxDelay = 45000;
+            const randomDelay = this.getRandomDelay(minDelay, maxDelay);
+            
+            if (currentTime - this.lastPingTimestamp < randomDelay) {
+                const waitTime = randomDelay - (currentTime - this.lastPingTimestamp);
+                console.log(chalk.gray(`等待 ${Math.floor(waitTime/1000)} 秒后进行下一次ping...`));
+                await new Promise(resolve => setTimeout(resolve, waitTime));
             }
 
-            console.log(chalk.yellow(`\n等待 ${DELAY_SECONDS} 秒后进行下一次收获...`));
-            await delay(DELAY_SECONDS);
+            const response = await this.makeRequest('POST', '/user/nodes/ping', { type: 'extension' });
+            
+            this.lastPingTimestamp = Date.now();
+            
+            return {
+                statusCode: response.data.statusCode,
+                message: response.data.message,
+                metadataId: response.data.metadata.id
+            };
+        } catch (error) {
+            // 如果是429错误，增加等待时间并使用随机延迟
+            if (error.response?.status === 429) {
+                const retryDelay = this.getRandomDelay(60000, 90000); // 60-90秒随机延迟
+                console.log(chalk.yellow(`检测到请求频率限制，等待 ${Math.floor(retryDelay/1000)} 秒后重试...`));
+                await new Promise(resolve => setTimeout(resolve, retryDelay));
+                return this.ping(); // 重试
+            }
+            console.error(chalk.red(`Ping操作失败: ${error.message}`));
+            throw error;
         }
-    } catch (error) {
-        console.error(chalk.red(`致命错误: ${error.message}`));
-        process.exit(1);
-    } finally {
-        rl.close();
+    }
+
+    // 执行每日签到
+    async dailyCheckin() {
+        try {
+            const response = await this.makeRequest('POST', '/user/checkin');
+            return {
+                statusCode: response.data.statusCode,
+                message: response.data.message,
+                userData: response.data.metadata.user
+            };
+        } catch (error) {
+            const statusCode = error.response?.data?.statusCode || error.response?.status || 500;
+            const message = error.response?.data?.message || error.message;
+            throw {
+                statusCode,
+                message,
+                error: true
+            };
+        }
+    }
+
+    // 领取任务奖励
+    async claimTask(taskId) {
+        try {
+            const response = await this.makeRequest('POST', '/user/task', { taskId });
+            return {
+                statusCode: response.data.statusCode,
+                message: response.data.message,
+                userData: response.data.metadata?.user
+            };
+        } catch (error) {
+            const statusCode = error.response?.data?.statusCode || error.response?.status || 500;
+            const message = error.response?.data?.message || error.message;
+            throw {
+                statusCode,
+                message,
+                error: true
+            };
+        }
+    }
+
+    // 处理所有可用任务
+    async processTasks(completedTasks) {
+        const results = [];
+        
+        for (const task of this.tasksList) {
+            // 跳过已完成的任务
+            if (!completedTasks.includes(task.code)) {
+                try {
+                    // 任务之间添加1秒延迟
+                    await new Promise(resolve => setTimeout(resolve, 1000));
+                    const result = await this.claimTask(task.code);
+                    results.push({
+                        code: task.code,
+                        name: task.name,
+                        status: '成功',
+                        statusCode: result.statusCode,
+                        message: result.message
+                    });
+                    console.log(chalk.green(`✓ 任务 ${task.code} (${task.name}):`));
+                    console.log(chalk.green(`  状态: ${result.statusCode}`));
+                    console.log(chalk.green(`  消息: ${result.message}`));
+                } catch (error) {
+                    results.push({
+                        code: task.code,
+                        name: task.name,
+                        status: '失败',
+                        statusCode: error.statusCode,
+                        message: error.message
+                    });
+                    const errorColor = error.statusCode >= 500 ? 'red' : 'yellow';
+                    console.log(chalk[errorColor](`⨯ 任务 ${task.code} (${task.name}):`));
+                    console.log(chalk[errorColor](`  状态: ${error.statusCode}`));
+                    console.log(chalk[errorColor](`  消息: ${error.message}`));
+                }
+            } else {
+                results.push({
+                    code: task.code,
+                    name: task.name,
+                    status: '已跳过',
+                    statusCode: 200,
+                    message: '任务已完成'
+                });
+                console.log(chalk.white(`⚡ 任务 ${task.code} (${task.name}): 已完成`));
+            }
+        }
+        
+        return results;
     }
 }
 
-// 优雅退出处理
-process.on('SIGINT', () => {
-    console.log(chalk.bold('\n正在优雅关闭...'));
-    rl.close();
-    process.exit(0);
-});
+// 多账户管理类
+class MultiAccountPinger {
+    constructor() {
+        this.accounts = [];  // 初始化accounts数组
+        this.isRunning = true;
+    }
 
-// 启动程序
-console.log(banner);
-continuousHarvest();
+    // 从用户输入获取账户和代理信息
+    async getUserInput() {
+        console.log(chalk.cyan('\n请输入账户信息（输入空行结束）：'));
+        
+        while (true) {
+            const token = await question(chalk.yellow('请输入Token (留空结束): '));
+            if (!token.trim()) break;
+
+            const useProxy = await question(chalk.yellow('是否使用代理? (y/n): '));
+            let proxy = null;
+            
+            if (useProxy.toLowerCase() === 'y') {
+                console.log(chalk.cyan('\n支持的代理格式:'));
+                console.log(chalk.white('1. IP:端口:用户名:密码'));
+                console.log(chalk.white('   例如: 92.113.82.78:44989:username:password'));
+                console.log(chalk.white('2. 用户名:密码@IP:端口'));
+                console.log(chalk.white('   例如: username:password@92.113.82.78:44989'));
+                console.log(chalk.white('3. IP:端口'));
+                console.log(chalk.white('   例如: 92.113.82.78:44989'));
+                console.log(chalk.white('4. 带协议格式:'));
+                console.log(chalk.white('   http://IP:端口'));
+                console.log(chalk.white('   socks5://IP:端口'));
+                console.log(chalk.white('   http://用户名:密码@IP:端口'));
+                console.log(chalk.white('   socks5://用户名:密码@IP:端口'));
+                console.log(chalk.white('\n支持的协议: http, https, socks4, socks5, socks4a, socks5h'));
+                proxy = await question(chalk.yellow('\n请输入代理地址: '));
+            }
+
+            this.accounts.push({
+                token: token.trim(),
+                proxy: proxy ? proxy.trim() : null
+            });
+
+            console.log(chalk.green('账户添加成功！\n'));
+        }
+
+        if (this.accounts.length === 0) {
+            console.log(chalk.red('错误：至少需要添加一个账户！'));
+            process.exit(1);
+        }
+
+        rl.close();
+    }
+
+    // 处理账户的初始任务
+    async processInitialTasks(account) {
+        const pinger = new NodeGoPinger(account.token, account.proxy);
+        
+        try {
+            console.log(chalk.white('='.repeat(50)));
+            
+            // 获取初始用户信息
+            const userInfo = await pinger.getUserInfo();
+            console.log(chalk.cyan(`账户初始化: ${userInfo.username} (${userInfo.email})`));
+            
+            // 执行每日签到
+            try {
+                const checkinResponse = await pinger.dailyCheckin();
+                console.log(chalk.green(`每日签到:`));
+                console.log(chalk.green(`  状态: ${checkinResponse.statusCode}`));
+                console.log(chalk.green(`  消息: ${checkinResponse.message}`));
+            } catch (error) {
+                console.log(chalk.yellow(`每日签到:`));
+                console.log(chalk.yellow(`  状态: ${error.statusCode}`));
+                console.log(chalk.yellow(`  消息: ${error.message}`));
+            }
+
+            // 处理所有可用任务
+            console.log(chalk.white('\n处理初始任务...')); 
+            await pinger.processTasks(userInfo.socialTasks || []);
+
+            console.log(chalk.green('\n初始任务完成'));
+            console.log(chalk.white('='.repeat(50)));
+        } catch (error) {
+            console.error(chalk.red(`处理初始任务时出错: ${error.message}`));
+            console.log(chalk.white('='.repeat(50)));
+        }
+    }
+
+    // 执行账户的ping操作
+    async processPing(account, accountIndex, totalAccounts) {
+        const pinger = new NodeGoPinger(account.token, account.proxy);
+        
+        try {
+            const userInfo = await pinger.getUserInfo();
+            console.log(chalk.cyan(`\n执行账户ping [${accountIndex + 1}/${totalAccounts}]: ${userInfo.username}`));
+            
+            const pingResponse = await pinger.ping();
+            console.log(chalk.green(`Ping状态:`));
+            console.log(chalk.green(`  状态: ${pingResponse.statusCode}`));
+            console.log(chalk.green(`  消息: ${pingResponse.message}`));
+            
+            // 显示节点状态
+            const updatedUserInfo = await pinger.getUserInfo();
+            if (updatedUserInfo.nodes.length > 0) {
+                console.log(chalk.magenta('节点状态:'));
+                updatedUserInfo.nodes.forEach((node, index) => {
+                    console.log(`  节点 ${index + 1}: 今日获得 ${node.todayPoint} 点数`);
+                });
+            }
+
+            // 在账户之间添加随机延迟
+            if (accountIndex < totalAccounts - 1) {
+                const accountDelay = this.getRandomDelay(10000, 20000); // 10-20秒随机延迟
+                console.log(chalk.gray(`\n等待 ${Math.floor(accountDelay/1000)} 秒后处理下一个账户...`));
+                await new Promise(resolve => setTimeout(resolve, accountDelay));
+            }
+        } catch (error) {
+            console.error(chalk.red(`账户ping失败: ${error.message}`));
+        }
+    }
+
+    // 生成随机延迟时间
+    getRandomDelay(min, max) {
+        return Math.floor(Math.random() * (max - min + 1)) + min;
+    }
+
+    // 运行主程序
+    async runPinger() {
+        displayBanner();
+        
+        // 获取用户输入
+        await this.getUserInput();
+        
+        // 处理优雅退出
+        process.on('SIGINT', () => {
+            console.log(chalk.yellow('\n正在优雅退出...')); 
+            this.isRunning = false;
+            setTimeout(() => process.exit(0), 1000);
+        });
+
+        // 初始处理 - 只运行一次
+        console.log(chalk.yellow('\n🚀 执行初始设置和任务...'));
+        for (let i = 0; i < this.accounts.length; i++) {
+            if (!this.isRunning) break;
+            await this.processInitialTasks(this.accounts[i]);
+            
+            // 在账户初始化之间添加随机延迟
+            if (i < this.accounts.length - 1) {
+                const initDelay = this.getRandomDelay(5000, 10000); // 5-10秒随机延迟
+                console.log(chalk.gray(`\n等待 ${Math.floor(initDelay/1000)} 秒后初始化下一个账户...`));
+                await new Promise(resolve => setTimeout(resolve, initDelay));
+            }
+        }
+
+        // 继续定期ping操作
+        console.log(chalk.yellow('\n⚡ 开始定期ping循环...'));
+        while (this.isRunning) {
+            console.log(chalk.white(`\n⏰ Ping循环时间 ${new Date().toLocaleString()}`));
+            
+            // 处理所有账户
+            for (let i = 0; i < this.accounts.length; i++) {
+                if (!this.isRunning) break;
+                await this.processPing(this.accounts[i], i, this.accounts.length);
+            }
+
+            if (this.isRunning) {
+                // 使用90-150秒的随机延迟作为循环间隔
+                const cycleDelay = this.getRandomDelay(90000, 150000);
+                console.log(chalk.gray(`\n等待 ${Math.floor(cycleDelay/1000)} 秒进行下一轮循环...`));
+                await new Promise(resolve => setTimeout(resolve, cycleDelay));
+            }
+        }
+    }
+}
+
+// 运行多账户pinger
+const multiPinger = new MultiAccountPinger();
+multiPinger.runPinger();
