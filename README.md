@@ -1,176 +1,165 @@
-# 🤖 STORK ORACLE 自动验证机器人
+# LayerEdge 自动化工具
 
-![Node Version](https://img.shields.io/badge/Node.js-22.x-brightgreen)
-![License](https://img.shields.io/badge/License-MIT-blue)
-![Language](https://img.shields.io/badge/Language-中文-red)
+## 🎯 项目注册
 
-## 📖 项目介绍
+1. 访问官网：[LayerEdge](https://dashboard.layeredge.io/)
+2. 点击 "Connect Wallet" 连接钱包
+3. 使用邀请码：`u5AVxlcK`
 
-这是一个用于 STORK ORACLE 网络的自动验证机器人，支持多账号管理、代理配置和自动验证功能。通过本机器人，您可以轻松参与 STORK ORACLE 的数据验证工作。
+---
 
-### ✨ 主要特点
+LayerEdge 节点自动化管理工具，支持多钱包、多代理、定时任务等功能。
 
-- 🚀 支持多账号同时运行
-- 🔐 每个账号独立配置代理
-- 💾 自动保存和管理 Token
-- 📊 实时显示验证统计
-- 🔄 自动错误重试
-- 🌐 支持 HTTP/HTTPS/SOCKS 代理
+## 🌟 主要功能
 
-## 🚀 快速开始
+- ✨ 自动运行节点
+- 🔄 每小时自动领取积分
+- 🔐 多钱包批量管理
+- 📡 支持多种代理格式
+- 🤖 全自动化运行
+- 🕒 定时执行任务
 
-### 1️⃣ 前置要求
+## 📋 环境要求
 
-- Node.js 22.x
-- Linux/Windows 系统
-- 稳定的网络连接
-- Chrome 浏览器
+- Linux/Windows 服务器或本地电脑
+- Node.js 22.x 版本
+- 稳定的网络环境
+- （可选）HTTP/SOCKS5代理
 
-### 2️⃣ 安装步骤
+## 🚀 安装教程
 
-#### 第一步：安装 Chrome 插件
-1. 访问 Chrome 商店安装 [Stork Verify](https://chromewebstore.google.com/detail/stork-verify/knnliglhgkmlblppdejchidfihjnockl) 插件
+### Windows 环境
 
-#### 第二步：注册账号
-1. 点击浏览器中的 Stork Verify 插件图标
-2. 选择"使用电子邮件注册"
-3. 填写注册信息：
-   - 📧 电子邮件地址
-   - 🔑 密码（建议使用强密码）
-   - 🎯 邀请码：`5LUXWB9MN4`
-4. 完成邮箱验证
+1. 下载并安装 [Node.js 22.x](https://nodejs.org/)
+2. 下载此项目源码
+3. 按照下方配置说明进行设置
 
-## 💻 部署教程
+### Linux VPS 环境
 
-### 1️⃣ VPS 环境配置
-
+1. 安装 NVM
 ```bash
-# 1. 安装 nvm
 curl -o- https://raw.githubusercontent.com/nvm-sh/nvm/v0.40.1/install.sh | bash
 
-# 2. 配置环境变量（根据您的 shell 选择）
-source ~/.bashrc   # bash 用户
-source ~/.zshrc    # zsh 用户
+# 根据您的终端选择：
+source ~/.bashrc   # bash用户
+source ~/.zshrc    # zsh用户
+```
 
-# 3. 安装 Node.js
+2. 安装 Node.js
+```bash
+# 安装 Node.js 22
 nvm install 22
+
+# 设置默认版本
 nvm use 22
 nvm alias default 22
 
-# 4. 验证安装
+# 验证安装
 node -v
 npm -v
 ```
 
-### 2️⃣ 下载并安装项目
-
+3. 下载项目
 ```bash
-# 1. 克隆项目
-git clone https://github.com/mumumusf/STORK.git
-cd STORK
-
-# 2. 安装依赖
-npm install
+git clone https://github.com/mumumusf/layeredge.git
+cd layeredge
 ```
 
-### 3️⃣ 后台运行配置
-
+4. 安装依赖
 ```bash
-# 安装 screen
-apt-get update
-apt-get install screen
-
-# 创建新会话
-screen -S stork-bot
-
-# 启动机器人
-node index.js
-
-# 分离会话：按 Ctrl + A, 然后按 D
-# 重新连接：screen -r stork-bot
-# 查看所有会话：screen -ls
+npm install
 ```
 
 ## ⚙️ 配置说明
 
-### 账号配置
-运行机器人时，需要输入：
-- 📧 邮箱地址
-- 🔑 密码
-- 🌐 代理地址（可选）
-
-### 代理配置
-支持以下格式：
-```bash
-# 简单格式
-ip:port
-
-# 带认证格式
-ip:port:username:password
-
-# 完整格式
-protocol:ip:port:username:password
-
-# 示例
-http://192.168.1.1:8080
-socks5://proxy.example.com:1080:user:pass
+### 1. 钱包配置 (wallets.json)
+```json
+[
+  {
+    "address": "你的钱包地址",
+    "privateKey": "你的私钥"
+  }
+]
 ```
 
-## 📁 文件说明
+### 2. 代理配置 (proxy.txt)
+支持以下格式：
+```
+ip:port
+ip:port:username:password
+http://username:password@ip:port
+socks5://username:password@ip:port
+```
 
-- 📄 `index.js` - 主程序文件
-- 🔐 `tokens_账号邮箱.json` - Token 存储
-- 🌐 `proxies_账号邮箱.txt` - 代理配置
+## 🎮 使用方法
 
-## ❗ 常见问题
+### 1. 普通启动
+```bash
+npm run start
+```
 
-### Token 刷新/认证错误
-- ✔️ 检查账号密码
-- ✔️ 验证网络连接
-- ✔️ 测试代理可用性
+### 2. 使用 Screen 后台运行（推荐）
+```bash
+# 安装 screen（如未安装）
+apt update
+apt install screen -y
 
-### 代理连接失败
-- ✔️ 检查代理格式
-- ✔️ 确认代理在线
-- ✔️ 验证认证信息
+# 创建新的 screen 会话
+screen -S layeredge
 
-### 程序意外退出
-- ✔️ 使用 screen 运行
-- ✔️ 检查错误日志
-- ✔️ 确保内存充足
+# 进入项目目录
+cd LayerEdge-Auto-Bot
 
-## 📌 注意事项
+# 启动程序
+npm run start
 
-1. 使用高质量代理
-2. 定期检查运行状态
-3. 安全保管账号信息
-4. 每账号独立代理
-5. 及时更新程序版本
+# 按 Ctrl+A+D 将程序放入后台运行
 
-## 🔒 安全提醒
+# 重新连接到程序界面
+screen -r layeredge
 
-- ⚠️ 不保存明文密码
-- ⚠️ 定期更改密码
-- ⚠️ 使用可靠代理
-- ⚠️ 及时更新程序
+# 查看所有 screen 会话
+screen -ls
+```
 
-## 🆘 技术支持
+### 3. 按照提示进行操作：
+   - 选择是否使用现有配置
+   - 如果选择否，可以手动输入新的钱包和代理信息
+   - 程序会自动保存配置并开始运行
 
-遇到问题请提供：
-1. 错误截图
-2. 环境信息
-3. 操作步骤
+## ⚠️ 注意事项
+
+1. 请勿泄露您的私钥
+2. 建议使用代理以提高成功率
+3. 如遇到问题，请检查网络连接和代理设置
+4. 程序出错会自动重试，无需手动干预
+5. 可以同时添加多个钱包和代理
+
+## 🔄 更新日志
+
+### v1.0.0
+- 支持多钱包管理
+- 添加代理支持
+- 实现自动化任务
+- 优化错误处理
+- 添加中文界面
 
 ## ⚠️ 免责声明
 
-- 本程序仅供学习交流
-- 用户承担使用风险
-- 遵守平台服务条款
+- 本程序仅供学习交流使用
+- 使用本程序产生的任何后果由用户自行承担
+- 请遵守相关平台的服务条款
 
 ## 📱 联系方式
 
-- 🐦 Twitter：[@YOYOMYOYOA](https://x.com/YOYOMYOYOA)
-- ✈️ Telegram：[@YOYOZKS](https://t.me/YOYOZKS)
+- Twitter：[@YOYOMYOYOA](https://x.com/YOYOMYOYOA)
+- Telegram：[@YOYOZKS](https://t.me/YOYOZKS)
 
 ---
-由 [@YOYOMYOYOA](https://x.com/YOYOMYOYOA) 用 ❤️ 制作
+由 [@YOYOMYOYOA](https://x.com/YOYOMYOYOA) 用❤️制作
+
+## 🔗 相关链接
+
+- 项目仓库：[GitHub](https://github.com/mumumusf/layeredge)
+- 官方网站：[LayerEdge](https://dashboard.layeredge.io/)
+
